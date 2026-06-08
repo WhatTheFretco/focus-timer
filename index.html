@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Focus Timer</title>
+<style>
+  :root {
+    --work-color: #d97a3f;
+    --break-color: #5b8ab0;
+    --bg: #11192b;
+    --bg-break: #0f1f30;
+    --text: #eef1f6;
+    --muted: #8b96aa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Georgia', 'Iowan Old Style', -apple-system, BlinkMacSystemFont, serif;
+    transition: background 0.6s ease;
+  }
+  body.break-mode { background: var(--bg-break); }
+
+  h1 {
+    font-weight: 400;
+    letter-spacing: 3px;
+    margin-bottom: 8px;
+    font-size: 1.1rem;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .ring-wrap {
+    position: relative;
+    width: 320px;
+    height: 320px;
+  }
+  svg { transform: rotate(-90deg); }
+  .ring-bg { stroke: rgba(255,255,255,0.06); }
+  .ring-progress {
+    stroke: var(--work-color);
+    stroke-linecap: butt;
+    transition: stroke-dashoffset 1s linear, stroke 0.6s ease;
+  }
+  body.break-mode .ring-progress { stroke: var(--break-color); }
+
+  .ring-center {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .time { font-size: 3.4rem; font-weight: 400; font-variant-numeric: tabular-nums; letter-spacing: 1px; }
+  .label { margin-top: 6px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 4px; color: var(--muted); }
+
+  .controls { margin-top: 28px; display: flex; gap: 10px; }
+  button {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.16);
+    color: var(--text);
+    padding: 11px 26px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.1s ease;
+  }
+  button:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.3); }
+  button:active { transform: scale(0.97); }
+  button.primary { background: var(--work-color); border-color: var(--work-color); color: #11192b; font-weight: 600; }
+  button.primary:hover { background: var(--work-color); filter: brightness(1.1); }
+  body.break-mode button.primary { background: var(--break-color); border-color: var(--break-color); }
+
+  .sessions { margin-top: 22px; font-size: 0.78rem; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin: 0 3px; background: rgba(255,255,255,0.14); }
+  .dot.filled { background: var(--work-color); }
+  body.break-mode .dot.filled { background: var(--break-color); }
+</style>
+</head>
+<body>
+  <h1>Get to work.</h1>
+  <div class="ring-wrap">
+    <svg width="320" height="320">
+      <circle class="ring-bg" cx="160" cy="160" r="140" stroke-width="14" fill="none"/>
+      <circle class="ring-progress" id="ring" cx="160" cy="160" r="140" stroke-width="14" fill="none"
+              stroke-dasharray="879.6" stroke-dashoffset="0"/>
+    </svg>
+    <div class="ring-center">
+      <div class="time" id="time">25:00</div>
+      <div class="label" id="modeLabel">Focus</div>
+    </div>
+  </div>
+  <div class="controls">
+    <button class="primary" id="startBtn">Start</button>
+    <button id="resetBtn">Reset</button>
+    <button id="skipBtn">Skip</button>
+  </div>
+  <div class="sessions" id="sessions"></div>
+
+  <audio id="ding" preload="auto">
+    <source src="data:audio/wav;base64,UklGRl9vAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YTtvAAB/gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp+goaKjpKWmp6ipqqusra6vsLGys7S1tre4ubq7vL2+v8DBwsPExcbHyMnKy8zNzs/Q0dLT1NXW19jZ2tvc3d7f4OHi4+Tl5ufo6err7O3u7/Dx8vP09fb3+Pn6+/z9/v8AAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4/QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl9gYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1+fwUTI=" type="audio/wav">
+  </audio>
+
+<script>
+  const WORK_MIN = 25;
+  const BREAK_MIN = 5;
+  const LONG_BREAK_MIN = 15;
+  const SESSIONS_BEFORE_LONG_BREAK = 4;
+
+  const RADIUS = 140;
+  const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+
+  const ring = document.getElementById('ring');
+  const timeEl = document.getElementById('time');
+  const modeLabel = document.getElementById('modeLabel');
+  const startBtn = document.getElementById('startBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const skipBtn = document.getElementById('skipBtn');
+  const sessionsEl = document.getElementById('sessions');
+  const ding = document.getElementById('ding');
+
+  ring.style.strokeDasharray = CIRCUMFERENCE;
+
+  let mode = 'work'; // 'work' | 'break' | 'longBreak'
+  let totalSeconds = WORK_MIN * 60;
+  let secondsLeft = totalSeconds;
+  let running = false;
+  let intervalId = null;
+  let completedSessions = 0;
+
+  function modeDuration(m) {
+    if (m === 'work') return WORK_MIN * 60;
+    if (m === 'break') return BREAK_MIN * 60;
+    return LONG_BREAK_MIN * 60;
+  }
+
+  function render() {
+    const m = Math.floor(secondsLeft / 60).toString().padStart(2, '0');
+    const s = (secondsLeft % 60).toString().padStart(2, '0');
+    timeEl.textContent = `${m}:${s}`;
+
+    const fraction = secondsLeft / totalSeconds;
+    ring.style.strokeDashoffset = CIRCUMFERENCE * (1 - fraction);
+
+    document.body.classList.toggle('break-mode', mode !== 'work');
+    modeLabel.textContent = mode === 'work' ? 'Focus' : (mode === 'longBreak' ? 'Long Break' : 'Break');
+    document.title = `${m}:${s} — ${modeLabel.textContent}`;
+
+    startBtn.textContent = running ? 'Pause' : (secondsLeft === totalSeconds ? 'Start' : 'Resume');
+
+    renderDots();
+  }
+
+  function renderDots() {
+    let dots = '';
+    for (let i = 0; i < SESSIONS_BEFORE_LONG_BREAK; i++) {
+      const filled = (completedSessions % SESSIONS_BEFORE_LONG_BREAK) > i ||
+                     (completedSessions > 0 && completedSessions % SESSIONS_BEFORE_LONG_BREAK === 0 && i < SESSIONS_BEFORE_LONG_BREAK);
+      dots += `<span class="dot ${filled ? 'filled' : ''}"></span>`;
+    }
+    sessionsEl.innerHTML = `Sessions completed: ${completedSessions} &nbsp; ${dots}`;
+  }
+
+  function tick() {
+    secondsLeft--;
+    if (secondsLeft < 0) {
+      finishPhase();
+      return;
+    }
+    render();
+  }
+
+  function finishPhase() {
+    pause();
+    ding.currentTime = 0;
+    ding.play().catch(() => {});
+
+    if (mode === 'work') {
+      completedSessions++;
+      mode = (completedSessions % SESSIONS_BEFORE_LONG_BREAK === 0) ? 'longBreak' : 'break';
+    } else {
+      mode = 'work';
+    }
+    totalSeconds = modeDuration(mode);
+    secondsLeft = totalSeconds;
+    render();
+
+    // Auto-start the next phase so you never have to touch a separate timer
+    start();
+  }
+
+  function start() {
+    if (running) return;
+    running = true;
+    intervalId = setInterval(tick, 1000);
+    render();
+  }
+
+  function pause() {
+    running = false;
+    clearInterval(intervalId);
+    render();
+  }
+
+  function reset() {
+    pause();
+    mode = 'work';
+    totalSeconds = modeDuration(mode);
+    secondsLeft = totalSeconds;
+    completedSessions = 0;
+    render();
+  }
+
+  function skip() {
+    pause();
+    secondsLeft = 0;
+    finishPhase();
+  }
+
+  startBtn.addEventListener('click', () => running ? pause() : start());
+  resetBtn.addEventListener('click', reset);
+  skipBtn.addEventListener('click', skip);
+
+  render();
+</script>
+</body>
+</html>
